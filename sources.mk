@@ -6,7 +6,9 @@ endif
 
 PBLE_SRCS := $(pble-basedir)src/common.c
 
-ifeq ($(PBLE_TARGET_PLATFORM), esp32)
+ifeq ($(PBLE_TARGET_PLATFORM), dummy)
+PBLE_SRCS += $(pble-basedir)src/dummy.c
+else ifeq ($(PBLE_TARGET_PLATFORM), esp32)
 PBLE_SRCS += $(pble-basedir)src/esp32.c
 else ifeq ($(PBLE_TARGET_PLATFORM), nrf52)
 PBLE_SRCS += $(pble-basedir)src/nrf52.c
