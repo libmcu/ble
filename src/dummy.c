@@ -6,12 +6,12 @@
 
 #include "pble/ble.h"
 
-struct ble *dummy_ble_create(void)
+struct ble *ble_create_default(void)
 {
 	return 0;
 }
 
-void dummy_ble_destroy(struct ble *self)
+void ble_destroy_default(struct ble *self)
 {
 	(void)self;
 }
