@@ -17,7 +17,7 @@ Supported target platforms are:
 - zephyr
 
 ```cmake
-set(PBLE_TARGET_PLATFORM esp32)
+set(TARGET_PLATFORM esp32)
 add_subdirectory(pble)
 target_link_libraries(pble idf::bt)
 ```

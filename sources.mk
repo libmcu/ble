@@ -6,16 +6,15 @@ endif
 
 PBLE_SRCS := $(pble-basedir)src/common.c
 
-ifeq ($(PBLE_TARGET_PLATFORM), dummy)
-PBLE_SRCS += $(pble-basedir)src/dummy.c
-else ifeq ($(PBLE_TARGET_PLATFORM), esp32)
+ifeq ($(TARGET_PLATFORM), esp32)
 PBLE_SRCS += $(pble-basedir)src/esp32.c
-else ifeq ($(PBLE_TARGET_PLATFORM), nrf52)
+else ifeq ($(TARGET_PLATFORM), nrf52)
 PBLE_SRCS += $(pble-basedir)src/nrf52.c
-else ifeq ($(PBLE_TARGET_PLATFORM), zephyr)
+else ifeq ($(TARGET_PLATFORM), zephyr)
 PBLE_SRCS += $(pble-basedir)src/zephyr.c
 else
-$(error "No target specified.")
+$(warning "No target specified. Building with dummy target")
+PBLE_SRCS += $(pble-basedir)src/dummy.c
 endif
 
 PBLE_INCS := $(pble-basedir)include

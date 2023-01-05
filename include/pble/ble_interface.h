@@ -19,8 +19,8 @@ extern "C" {
 #endif
 
 #undef esp32 /* to prevent expansion to a constant number since esp32 is defined by ESP-IDF build system */
-#define ble_create_default	CONCAT(PBLE_TARGET_PLATFORM, _ble_create)
-#define ble_destroy_default	CONCAT(PBLE_TARGET_PLATFORM, _ble_destroy)
+#define ble_create_default	CONCAT(TARGET_PLATFORM, _ble_create)
+#define ble_destroy_default	CONCAT(TARGET_PLATFORM, _ble_destroy)
 
 struct ble *ble_create_default(void);
 void ble_destroy_default(struct ble *inst);
