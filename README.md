@@ -11,7 +11,6 @@ $ git submodule add https://github.com/libmcu/pble.git pble
 
 Supported target platforms are:
 
-- dummy
 - esp32
 - nrf52
 - zephyr
