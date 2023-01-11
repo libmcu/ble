@@ -495,7 +495,7 @@ static enum ble_device_addr get_device_address(struct ble *iface,
 
 static void initialize(struct ble *iface)
 {
-	ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
+	/* ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init()); */
 	nimble_port_init();
 
 	ble_hs_cfg.reset_cb = on_reset;
@@ -549,7 +549,7 @@ static int disable_device(struct ble *self)
 
 	rc |= nimble_port_stop();
 	nimble_port_deinit();
-	rc |= esp_nimble_hci_and_controller_deinit();
+	/* rc |= esp_nimble_hci_and_controller_deinit(); */
 	onair = NULL;
 
 	return rc;
