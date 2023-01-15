@@ -15,6 +15,10 @@ extern "C" {
 #include <stdint.h>
 #include <inttypes.h>
 
+#if !defined(BLE_DEFAULT_DEVICE_NAME)
+#define BLE_DEFAULT_DEVICE_NAME			"libmcu"
+#endif
+
 #if !defined(BLE_ADV_MAX_PAYLOAD_SIZE)
 #define BLE_ADV_MAX_PAYLOAD_SIZE		\
 		(37U - 6U/*advertiser address*/ - 2U/*header+length*/)
@@ -26,7 +30,7 @@ extern "C" {
 
 enum ble_adv_mode {
 	BLE_ADV_IND,         /**< connectable     scannable     undirected */
-	BLE_ADV_DIRECT_IND,  /**< connectable     scannable     directed */
+	BLE_ADV_DIRECT_IND,  /**< connectable     non-scannable directed */
 	BLE_ADV_NONCONN_IND, /**< non-connectable non-scannable undirected */
 	BLE_ADV_SCAN_IND,    /**< non-connectable scannable     undirected */
 };

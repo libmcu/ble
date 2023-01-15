@@ -21,10 +21,6 @@
 
 PBLE_STATIC_ASSERT(BLE_GAP_EVT_MAX < UINT8_MAX);
 
-#if !defined(BLE_DEFAULT_DEVICE_NAME)
-#define BLE_DEFAULT_DEVICE_NAME		"libmcu"
-#endif
-
 #define BASE(x, unit)			((x) & ~((__typeof__(x))(unit) - 1UL))
 #define ALIGN(x, unit)			\
 	BASE((x) + ((__typeof__(x))(unit) - 1UL), unit)
