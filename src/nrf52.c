@@ -63,6 +63,7 @@ static int adv_stop(struct ble *self);
 static void on_ble_events(ble_evt_t const * p_ble_evt, void * p_context)
 {
 	switch (p_ble_evt->header.evt_id) {
+	case BLE_GAP_EVT_ADV_SET_TERMINATED:
 	case BLE_GAP_EVT_CONNECTED:
 	case BLE_GAP_EVT_DISCONNECTED:
 	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -155,14 +156,10 @@ static int initialize_advertising(struct ble *self,
 	}
 
 	handle->adv_params.primary_phy = BLE_GAP_PHY_1MBPS;
-	handle->adv_params.duration =
-		handle->adv_modes_config.ble_adv_fast_timeout;
 	handle->adv_params.properties.type =
 		BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED;
 	handle->adv_params.p_peer_addr = NULL;
 	handle->adv_params.filter_policy = BLE_GAP_ADV_FP_ANY;
-	handle->adv_params.interval =
-		handle->adv_modes_config.ble_adv_fast_interval;
 
 	switch (self->adv.mode) {
 	case BLE_ADV_DIRECT_IND:
@@ -209,6 +206,11 @@ static int adv_start(struct ble *self)
 	self->adv.handle.adv_data.scan_rsp_data.len =
 			self->adv.scan_response.index;
 
+	self->adv.handle.adv_modes_config.ble_adv_fast_timeout =
+		self->adv.duration_ms / 10;
+	self->adv.handle.adv_modes_config.ble_adv_fast_interval =
+		self->adv.min_ms * 1000UL / ADV_INTERVAL_UNIT_THOUSANDTH;
+
 	uint32_t err = ble_advertising_start(&self->adv.handle,
 			BLE_ADV_MODE_FAST);
 	if (err != NRF_SUCCESS) {
@@ -237,9 +239,6 @@ static int adv_init(struct ble *self, enum ble_adv_mode mode)
 
 	ble_adv_modes_config_t cfg = {
 		.ble_adv_fast_enabled = true,
-		.ble_adv_fast_interval = self->adv.min_ms * 1000UL /
-			ADV_INTERVAL_UNIT_THOUSANDTH,
-		.ble_adv_fast_timeout = self->adv.duration_ms / 10,
 		.ble_adv_on_disconnect_disabled = true,
 	};
 
@@ -357,7 +356,8 @@ struct ble *nrf52_ble_create(void)
 		.api = {
 			.enable = enable_device,
 			.disable = disable_device,
-			.register_gap_event_callback = register_gap_event_callback,
+			.register_gap_event_callback =
+				register_gap_event_callback,
 			.get_device_address = get_device_address,
 
 			.adv_init = adv_init,
