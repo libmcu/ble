@@ -112,6 +112,30 @@ static void on_adv_event(ble_adv_evt_t ble_adv_evt)
 	}
 }
 
+static enum ble_device_addr read_device_address(uint8_t addr[BLE_ADDR_LEN])
+{
+	ble_gap_addr_t mac;
+
+	if (sd_ble_gap_addr_get(&mac) != NRF_SUCCESS) {
+		PBLE_LOG_ERROR("error reading address");
+		PBLE_ASSERT(0);
+	}
+
+	memcpy(addr, mac.addr, BLE_ADDR_LEN);
+
+	switch (mac.addr_type) {
+	case BLE_GAP_ADDR_TYPE_RANDOM_STATIC:
+		return BLE_ADDR_STATIC_RPA;
+	case BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_RESOLVABLE:
+		return BLE_ADDR_PRIVATE_RPA;
+	case BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_NON_RESOLVABLE:
+		return BLE_ADDR_PRIVATE_NRPA;
+	default:
+	case BLE_GAP_ADDR_TYPE_PUBLIC:
+		return BLE_ADDR_PUBLIC;
+	}
+}
+
 static int adv_set_interval(struct ble *self, uint16_t min_ms, uint16_t max_ms)
 {
 	PBLE_ASSERT(min_ms >= BLE_ADV_MIN_INTERVAL_MS &&
@@ -231,6 +255,12 @@ static int adv_start(struct ble *self)
 		return -ENETDOWN;
 	}
 
+	enum ble_device_addr type = read_device_address(self->addr);
+	if (type != self->addr_type) {
+		PBLE_LOG_WARN("addr type mismatch: %d expected but %d",
+				self->addr_type, type);
+	}
+
 	return 0;
 }
 
@@ -269,7 +299,7 @@ static enum ble_device_addr get_device_address(struct ble *self,
 		uint8_t addr[BLE_ADDR_LEN])
 {
 	memcpy(addr, self->addr, BLE_ADDR_LEN);
-	return self->addr_type;
+	return (enum ble_device_addr)self->addr_type;
 }
 
 static int initialize(struct ble *self)

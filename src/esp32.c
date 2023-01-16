@@ -486,7 +486,7 @@ static enum ble_device_addr get_device_address(struct ble *iface,
 		uint8_t addr[BLE_ADDR_LEN])
 {
 	memcpy(addr, iface->addr, BLE_ADDR_LEN);
-	return iface->addr_type;
+	return (enum ble_device_addr)iface->addr_type;
 }
 
 static void initialize(struct ble *iface)
