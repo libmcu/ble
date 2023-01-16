@@ -54,18 +54,27 @@ struct ble {
 	uint8_t addr_type;
 	uint8_t addr[BLE_ADDR_LEN];
 	uint16_t connection_handle;
+
+	bool onair;
 };
 
-static struct ble *onair;
+static struct ble static_instance;
 static int adv_start(struct ble *self);
 static int adv_stop(struct ble *self);
 
-static void on_ble_events(ble_evt_t const * p_ble_evt, void * p_context)
+static void on_ble_events(ble_evt_t const *p_ble_evt, void *p_context)
 {
+	struct ble *self = (struct ble *)p_context;
+	enum ble_gap_evt evt = BLE_GAP_EVT_UNKNOWN;
+
 	switch (p_ble_evt->header.evt_id) {
 	case BLE_GAP_EVT_ADV_SET_TERMINATED:
+		evt = BLE_GAP_EVT_ADV_COMPLETE;
+		break;
 	case BLE_GAP_EVT_CONNECTED:
+		evt = BLE_GAP_EVT_CONNECTED;
 	case BLE_GAP_EVT_DISCONNECTED:
+		evt = BLE_GAP_EVT_DISCONNECTED;
 	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
 	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
@@ -76,6 +85,10 @@ static void on_ble_events(ble_evt_t const * p_ble_evt, void * p_context)
 	default:
 		PBLE_LOG_INFO("EVT: %d", p_ble_evt->header.evt_id);
 		break;
+	}
+
+	if (self && self->gap_event_callback) {
+		self->gap_event_callback(self, evt, 0);
 	}
 }
 
@@ -277,7 +290,8 @@ static int initialize(struct ble *self)
 		return -EADDRNOTAVAIL;
 	}
 
-	NRF_SDH_BLE_OBSERVER(event_handle, BLE_PRIORITY, on_ble_events, NULL);
+	NRF_SDH_BLE_OBSERVER(event_handle, BLE_PRIORITY,
+			on_ble_events, &static_instance);
 
 	ble_gap_conn_sec_mode_t sec_mode;
 	BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
@@ -325,14 +339,14 @@ static int enable_device(struct ble *self,
 {
 	int rc = 0;
 
-	if (!onair) {
+	if (!self->onair) {
 		self->addr_type = addr_type;
 		if (addr) {
 			memcpy(self->addr, addr, sizeof(self->addr));
 		}
 
 		if ((rc = initialize(self)) == 0) {
-			onair = self;
+			self->onair = true;
 		}
 	}
 
@@ -346,13 +360,15 @@ static int disable_device(struct ble *self)
 	}
 
 out:
-	onair = NULL;
+#if 0 /* TODO: implement disable functionality */
+	self->onair = false;
+#endif
 	return 0;
 }
 
 struct ble *nrf52_ble_create(void)
 {
-	static struct ble self = {
+	static_instance = (struct ble) {
 		.api = {
 			.enable = enable_device,
 			.disable = disable_device,
@@ -370,7 +386,7 @@ struct ble *nrf52_ble_create(void)
 		},
 	};
 
-	return &self;
+	return &static_instance;
 }
 
 void nrf52_ble_destroy(struct ble *self)
