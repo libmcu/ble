@@ -21,12 +21,14 @@
 #include "nrf_sdh.h"
 #include "nrf_sdh_ble.h"
 #include "ble_advertising.h"
+#include "nrf_ble_gatt.h"
 
 PBLE_STATIC_ASSERT(BLE_GAP_EVT_MAX < UINT8_MAX);
 
 #define BLE_PRIORITY			3
 #define ADV_INTERVAL_UNIT_THOUSANDTH	625
 #define DEFAULT_ADV_INTERVAL_MS		180
+#define DEFAULT_MTU_SIZE		23
 
 enum ble_tag {
 	CONN_CFG_TAG			= 0,
@@ -108,6 +110,16 @@ static void on_adv_event(ble_adv_evt_t ble_adv_evt)
 		break;
         default:
 		PBLE_LOG_INFO("ADV event: %d", ble_adv_evt);
+		break;
+	}
+}
+
+static void on_gatt_event(nrf_ble_gatt_t *pgatt, nrf_ble_gatt_evt_t const *pevt)
+{
+	switch (pevt->evt_id) {
+	case NRF_BLE_GATT_EVT_ATT_MTU_UPDATED:
+		PBLE_LOG_INFO("MTU on connection %x changed to %d",
+			pevt->conn_handle, pevt->params.att_mtu_effective);
 		break;
 	}
 }
@@ -295,6 +307,32 @@ static int adv_init(struct ble *self, enum ble_adv_mode mode)
 	return 0;
 }
 
+static struct ble_gatt_service *gatt_create_service(void *mem, uint16_t memsize,
+		const uint8_t *uuid, uint8_t uuid_len,
+		bool primary, uint8_t nr_chrs)
+{
+	(void)mem;
+	(void)memsize;
+	(void)uuid;
+	(void)uuid_len;
+	(void)primary;
+	(void)nr_chrs;
+	// 1. register 128-bit UUID, uuid_type = uint8_t
+	//err_code = sd_ble_uuid_vs_add(&ble_uuid128_t, &uuid_type);
+	// 2. add a service, (ble_uuid_t)
+	//err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, \
+                                        &ble_uuid_t, &service_handle);
+	// 3. char_add(service_handle, &ble_add_char_params_t, &char_handle)
+	// 4. update database
+	//err_code = sd_ble_gatts_value_set(BLE_CONN_HANDLE_INVALID, \
+					value_handle, &ble_gatts_value_t)
+	// 5. notify
+	//err_code = sd_ble_gatts_hvx(conn_handle, p_hvx_params)
+
+
+	return 0;
+}
+
 static enum ble_device_addr get_device_address(struct ble *self,
 		uint8_t addr[BLE_ADDR_LEN])
 {
@@ -302,7 +340,7 @@ static enum ble_device_addr get_device_address(struct ble *self,
 	return (enum ble_device_addr)self->addr_type;
 }
 
-static int initialize(struct ble *self)
+static int initialize_softdevice(void)
 {
 	uint32_t ram_start = 0;
 
@@ -323,6 +361,11 @@ static int initialize(struct ble *self)
 	NRF_SDH_BLE_OBSERVER(event_handle, BLE_PRIORITY,
 			on_ble_events, &static_instance);
 
+	return 0;
+}
+
+static int initialize_gap(struct ble *self)
+{
 	ble_gap_conn_sec_mode_t sec_mode;
 	BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
 	if (sd_ble_gap_device_name_set(&sec_mode,
@@ -362,6 +405,36 @@ static int initialize(struct ble *self)
 	}
 
 	return 0;
+}
+
+static int initialize_gatt(struct ble *self)
+{
+	int rc = 0;
+
+	NRF_BLE_GATT_DEF(gatt_handle);
+
+	if (nrf_ble_gatt_init(&gatt_handle, on_gatt_event) != NRF_SUCCESS) {
+		return -EIO;
+	}
+	if (nrf_ble_gatt_att_mtu_periph_set(&gatt_handle, DEFAULT_MTU_SIZE)
+			!= NRF_SUCCESS) {
+		return -EAGAIN;
+	}
+
+	return rc;
+}
+
+static int initialize(struct ble *self)
+{
+	int rc = 0;
+
+	if ((rc = initialize_softdevice()) != 0 ||
+			(rc = initialize_gap(self)) != 0 ||
+			(rc = initialize_gatt(self)) != 0) {
+		/* return error */
+	}
+
+	return rc;
 }
 
 static int enable_device(struct ble *self,
@@ -413,6 +486,8 @@ struct ble *nrf52_ble_create(void)
 			.adv_set_scan_response = adv_set_scan_response,
 			.adv_start = adv_start,
 			.adv_stop = adv_stop,
+
+			.gatt_create_service = gatt_create_service,
 		},
 	};
 
