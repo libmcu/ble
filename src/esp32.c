@@ -21,10 +21,6 @@
 
 PBLE_STATIC_ASSERT(BLE_GAP_EVT_MAX < UINT8_MAX);
 
-#if !defined(BLE_DEFAULT_DEVICE_NAME)
-#define BLE_DEFAULT_DEVICE_NAME		"libmcu"
-#endif
-
 #define BASE(x, unit)			((x) & ~((__typeof__(x))(unit) - 1UL))
 #define ALIGN(x, unit)			\
 	BASE((x) + ((__typeof__(x))(unit) - 1UL), unit)
@@ -461,8 +457,10 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 	return p->val_handle;
 }
 
-static int gatt_register_service(struct ble_gatt_service *svc)
+static int gatt_register_service(struct ble *ble, struct ble_gatt_service *svc)
 {
+	(void)ble;
+
 	int rc = ble_gatts_count_cfg(svc->base) |
 		ble_gatts_add_svcs(svc->base);
 
@@ -490,7 +488,7 @@ static enum ble_device_addr get_device_address(struct ble *iface,
 		uint8_t addr[BLE_ADDR_LEN])
 {
 	memcpy(addr, iface->addr, BLE_ADDR_LEN);
-	return iface->addr_type;
+	return (enum ble_device_addr)iface->addr_type;
 }
 
 static void initialize(struct ble *iface)
@@ -561,8 +559,10 @@ struct ble *esp32_ble_create(void)
 		.api = {
 			.enable = enable_device,
 			.disable = disable_device,
-			.register_gap_event_callback = register_gap_event_callback,
-			.register_gatt_event_callback = register_gatt_event_callback,
+			.register_gap_event_callback =
+				register_gap_event_callback,
+			.register_gatt_event_callback =
+				register_gatt_event_callback,
 			.get_device_address = get_device_address,
 
 			.adv_init = adv_init,

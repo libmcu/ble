@@ -119,7 +119,7 @@ static inline const uint16_t *ble_gatt_add_characteristic(struct ble *self,
 static inline int ble_gatt_register_service(struct ble *self,
 		struct ble_gatt_service *svc)
 {
-	return ((struct ble_api *)self)->gatt_register_service(svc);
+	return ((struct ble_api *)self)->gatt_register_service(self, svc);
 }
 
 static inline int ble_gatt_response(struct ble *self,
