@@ -127,7 +127,8 @@ struct ble_api {
 	const uint16_t *(*gatt_add_characteristic)(struct ble_gatt_service *svc,
 			const uint8_t *uuid, uint8_t uuid_len,
 			struct ble_gatt_characteristic *chr);
-	int (*gatt_register_service)(struct ble_gatt_service *svc);
+	int (*gatt_register_service)(struct ble *self,
+			struct ble_gatt_service *svc);
 	int (*gatt_response)(struct ble_handler_context *ctx,
 			const void *data, uint16_t datasize);
 	int (*gatt_notify)(struct ble *self, const void *attr_handle,

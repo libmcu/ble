@@ -457,8 +457,10 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 	return p->val_handle;
 }
 
-static int gatt_register_service(struct ble_gatt_service *svc)
+static int gatt_register_service(struct ble *ble, struct ble_gatt_service *svc)
 {
+	(void)ble;
+
 	int rc = ble_gatts_count_cfg(svc->base) |
 		ble_gatts_add_svcs(svc->base);
 
@@ -557,8 +559,10 @@ struct ble *esp32_ble_create(void)
 		.api = {
 			.enable = enable_device,
 			.disable = disable_device,
-			.register_gap_event_callback = register_gap_event_callback,
-			.register_gatt_event_callback = register_gatt_event_callback,
+			.register_gap_event_callback =
+				register_gap_event_callback,
+			.register_gatt_event_callback =
+				register_gatt_event_callback,
 			.get_device_address = get_device_address,
 
 			.adv_init = adv_init,

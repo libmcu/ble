@@ -22,6 +22,7 @@
 #include "nrf_sdh_ble.h"
 #include "ble_advertising.h"
 #include "nrf_ble_gatt.h"
+#include "ble_srv_common.h"
 
 PBLE_STATIC_ASSERT(BLE_GAP_EVT_MAX < UINT8_MAX);
 
@@ -29,10 +30,31 @@ PBLE_STATIC_ASSERT(BLE_GAP_EVT_MAX < UINT8_MAX);
 #define ADV_INTERVAL_UNIT_THOUSANDTH	625
 #define DEFAULT_ADV_INTERVAL_MS		180
 #define DEFAULT_MTU_SIZE		23
+#define UUID_128BIT_SIZE_BYTES		16
+#define MAX_ATTR_VALUE_LEN		(NRF_SDH_BLE_GATT_MAX_MTU_SIZE - 3)
 
 enum ble_tag {
 	CONN_CFG_TAG			= 0,
 	CONN_TAG			= 1,
+};
+
+struct gatt_characteristic_handler {
+	ble_gatts_char_handles_t handle;
+	ble_gatt_characteristic_handler func;
+	void *user_ctx;
+};
+
+struct ble_gatt_service {
+	struct ble_gatt_service *next;
+
+	uint16_t handle;
+	ble_uuid_t uuid;
+
+	struct {
+		uint8_t index;
+		uint8_t capacity;
+		struct gatt_characteristic_handler handlers[1];
+	} characteristics;
 };
 
 struct ble {
@@ -57,47 +79,14 @@ struct ble {
 	uint8_t addr[BLE_ADDR_LEN];
 	uint16_t connection_handle;
 
+	struct ble_gatt_service *svc;
+
 	bool onair;
 };
 
 static struct ble static_instance;
 static int adv_start(struct ble *self);
 static int adv_stop(struct ble *self);
-
-static void on_ble_events(ble_evt_t const *p_ble_evt, void *p_context)
-{
-	struct ble *self = (struct ble *)p_context;
-	enum ble_gap_evt evt = BLE_GAP_EVT_UNKNOWN;
-
-	switch (p_ble_evt->header.evt_id) {
-	case BLE_GAP_EVT_ADV_SET_TERMINATED:
-		evt = BLE_GAP_EVT_ADV_COMPLETE;
-		break;
-	case BLE_GAP_EVT_CONNECTED:
-		evt = BLE_GAP_EVT_CONNECTED;
-	case BLE_GAP_EVT_DISCONNECTED:
-		evt = BLE_GAP_EVT_DISCONNECTED;
-	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
-	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
-	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
-	case BLE_GAP_EVT_LESC_DHKEY_REQUEST:
-	case BLE_GAP_EVT_AUTH_STATUS:
-	case BLE_GATTC_EVT_TIMEOUT:
-	case BLE_GATTS_EVT_TIMEOUT:
-	default:
-		PBLE_LOG_INFO("EVT: %d", p_ble_evt->header.evt_id);
-		break;
-	}
-
-	if (self && self->gap_event_callback) {
-		self->gap_event_callback(self, evt, 0);
-	}
-}
-
-static void on_error(uint32_t error_code)
-{
-	PBLE_LOG_ERROR("ERR: %x", error_code);
-}
 
 static void on_adv_event(ble_adv_evt_t ble_adv_evt)
 {
@@ -122,6 +111,163 @@ static void on_gatt_event(nrf_ble_gatt_t *pgatt, nrf_ble_gatt_evt_t const *pevt)
 			pevt->conn_handle, pevt->params.att_mtu_effective);
 		break;
 	}
+	PBLE_LOG_INFO("GATT EVT: %d", pevt->evt_id);
+}
+
+static struct gatt_characteristic_handler *find_chr_by_handle(struct ble *self,
+		uint16_t handle)
+{
+	struct ble_gatt_service *svc = self->svc;
+
+	while (svc) {
+		for (uint8_t i = 0; i < svc->characteristics.capacity; i++) {
+			if (svc->characteristics.handlers[i].handle.value_handle
+					== handle) {
+				return &svc->characteristics.handlers[i];
+			}
+		}
+		svc = svc->next;
+	}
+
+	return NULL;
+}
+
+static int response_to_request(struct ble *self, uint8_t type,
+		const void *data, uint16_t datasize)
+{
+	ble_gatts_rw_authorize_reply_params_t reply_params = {
+		.type = BLE_GATTS_AUTHORIZE_TYPE_READ,
+		.params.read = { /* union struct of read and write */
+			.gatt_status = BLE_GATT_STATUS_SUCCESS,
+			.len = datasize,
+			.p_data = (const uint8_t *)data,
+			.update = true,
+		},
+	};
+
+	if (type == BLE_GATT_EVT_WRITE_CHR) {
+		reply_params.type = BLE_GATTS_AUTHORIZE_TYPE_WRITE;
+	}
+
+	if (sd_ble_gatts_rw_authorize_reply(self->connection_handle,
+				&reply_params) != NRF_SUCCESS) {
+		PBLE_LOG_ERROR("response failure");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void handle_rw_request(struct ble *self, const ble_evt_t *evt)
+{
+	struct gatt_characteristic_handler *p = find_chr_by_handle(self,
+			evt->evt.gatts_evt.params.authorize_request.request.read.handle);
+	const void *data = NULL;
+	uint16_t datasize = 0;
+
+	if (p == NULL) {
+		PBLE_LOG_ERROR("handle not found");
+		return;
+	}
+
+	struct ble_handler_context ctx = {
+		.event_type = BLE_GATT_EVT_READ_CHR,
+		.ctx = self,
+	};
+
+	if (evt->evt.gatts_evt.params.authorize_request.type ==
+			BLE_GATTS_AUTHORIZE_TYPE_WRITE) {
+		ctx.event_type = BLE_GATT_EVT_WRITE_CHR;
+		data = evt->evt.gatts_evt.params.authorize_request.request.write.data;
+		datasize = evt->evt.gatts_evt.params.authorize_request.request.write.len;
+	}
+
+	if (p->func) {
+		(*p->func)(&ctx, data, datasize, p->user_ctx);
+	}
+
+	if (ctx.event_type == BLE_GATT_EVT_WRITE_CHR) {
+		response_to_request(self, ctx.event_type, data, datasize);
+	}
+}
+
+static enum ble_gap_evt process_gatts_event(struct ble *self, const ble_evt_t *evt)
+{
+	switch (evt->header.evt_id) {
+	case BLE_GATTS_EVT_WRITE:
+		return BLE_GATT_EVT_WRITE_CHR;
+	case BLE_GATTS_EVT_RW_AUTHORIZE_REQUEST:
+		handle_rw_request(self, evt);
+		return BLE_GATT_EVT_READ_CHR;
+	default:
+	case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:
+	case BLE_GATTS_EVT_TIMEOUT:
+	case BLE_GATTC_EVT_TIMEOUT:
+		return evt->header.evt_id;
+	}
+}
+
+static enum ble_gap_evt process_gattc_event(struct ble *self, const ble_evt_t *evt)
+{
+	switch (evt->header.evt_id) {
+	case BLE_GATTC_EVT_TIMEOUT:
+	default:
+		return evt->header.evt_id;
+	}
+}
+
+static enum ble_gap_evt process_gap_event(struct ble *self, const ble_evt_t *evt)
+{
+	switch (evt->header.evt_id) {
+	case BLE_GAP_EVT_ADV_SET_TERMINATED:
+		return BLE_GAP_EVT_ADV_COMPLETE;
+	case BLE_GAP_EVT_CONNECTED:
+		self->connection_handle = evt->evt.gap_evt.conn_handle;
+		return LIBMCU_BLE_GAP_EVT_CONNECTED;
+	case BLE_GAP_EVT_DISCONNECTED:
+		return LIBMCU_BLE_GAP_EVT_DISCONNECTED;
+	case BLE_GAP_EVT_DATA_LENGTH_UPDATE:
+		return BLE_GAP_EVT_MTU;
+	default:
+	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
+	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
+	case BLE_GAP_EVT_LESC_DHKEY_REQUEST:
+	case BLE_GAP_EVT_AUTH_STATUS:
+		PBLE_LOG_INFO("EVT: %d", evt->header.evt_id);
+		return evt->header.evt_id;
+	}
+}
+
+static void on_ble_events(ble_evt_t const *p_ble_evt, void *p_context)
+{
+	struct ble *self = (struct ble *)p_context;
+	enum ble_gap_evt evt = BLE_GAP_EVT_UNKNOWN;
+	bool gatt = true;
+
+	if (p_ble_evt->header.evt_id >= BLE_GATTC_EVT_BASE &&
+			p_ble_evt->header.evt_id <= BLE_GATTC_EVT_LAST) {
+		evt = process_gattc_event(self, p_ble_evt);
+	} else if (p_ble_evt->header.evt_id >= BLE_GATTS_EVT_BASE &&
+			p_ble_evt->header.evt_id <= BLE_GATTS_EVT_LAST) {
+		evt = process_gatts_event(self, p_ble_evt);
+	} else {
+		evt = process_gap_event(self, p_ble_evt);
+		gatt = false;
+	}
+
+	if (gatt) {
+		if (self && self->gatt_event_callback) {
+			self->gatt_event_callback(self, evt, 0);
+		}
+	} else if (self && self->gap_event_callback) {
+		self->gap_event_callback(self, evt, 0);
+	}
+}
+
+static void on_error(uint32_t error_code)
+{
+	PBLE_LOG_ERROR("ERR: %x", error_code);
 }
 
 static enum ble_device_addr read_device_address(uint8_t addr[BLE_ADDR_LEN])
@@ -169,6 +315,12 @@ static void register_gap_event_callback(struct ble *self,
 					ble_event_callback_t cb)
 {
 	self->gap_event_callback = cb;
+}
+
+static void register_gatt_event_callback(struct ble *self,
+					 ble_event_callback_t cb)
+{
+	self->gatt_event_callback = cb;
 }
 
 static int adv_set_payload(struct ble *self,
@@ -311,24 +463,130 @@ static struct ble_gatt_service *gatt_create_service(void *mem, uint16_t memsize,
 		const uint8_t *uuid, uint8_t uuid_len,
 		bool primary, uint8_t nr_chrs)
 {
-	(void)mem;
-	(void)memsize;
-	(void)uuid;
-	(void)uuid_len;
-	(void)primary;
-	(void)nr_chrs;
-	// 1. register 128-bit UUID, uuid_type = uint8_t
-	//err_code = sd_ble_uuid_vs_add(&ble_uuid128_t, &uuid_type);
-	// 2. add a service, (ble_uuid_t)
-	//err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, \
-                                        &ble_uuid_t, &service_handle);
-	// 3. char_add(service_handle, &ble_add_char_params_t, &char_handle)
-	// 4. update database
-	//err_code = sd_ble_gatts_value_set(BLE_CONN_HANDLE_INVALID, \
-					value_handle, &ble_gatts_value_t)
-	// 5. notify
-	//err_code = sd_ble_gatts_hvx(conn_handle, p_hvx_params)
+	PBLE_ASSERT(mem != NULL);
 
+	memset(mem, 0, memsize);
+	struct ble_gatt_service *svc = (struct ble_gatt_service *)mem;
+	svc->characteristics.capacity = nr_chrs;
+
+	uint8_t svc_type = primary? BLE_GATTS_SRVC_TYPE_PRIMARY :
+			BLE_GATTS_SRVC_TYPE_SECONDARY;
+
+	/* 1. register a service UUID */
+	svc->uuid = (ble_uuid_t) {
+		.type = BLE_UUID_TYPE_BLE,
+		.uuid = *((const uint16_t *)uuid),
+	};
+
+	if (uuid_len == UUID_128BIT_SIZE_BYTES) {
+		if (sd_ble_uuid_vs_add((const ble_uuid128_t *)uuid,
+				&svc->uuid.type) != NRF_SUCCESS) {
+			PBLE_LOG_ERROR("can not register uuid");
+			return -ENOSPC;
+		}
+	}
+
+	/* 2. add a service */
+	if (sd_ble_gatts_service_add(svc_type, &svc->uuid, &svc->handle)
+			!= NRF_SUCCESS) {
+		PBLE_LOG_ERROR("service registration failure");
+		return -ENOMEM;
+	}
+
+	return svc;
+}
+
+static int gatt_register_service(struct ble *ble, struct ble_gatt_service *svc)
+{
+	svc->next = ble->svc;
+	ble->svc = svc;
+}
+
+static struct gatt_characteristic_handler *svc_chr_alloc(
+		struct ble_gatt_service *svc)
+{
+	if (svc->characteristics.index >= svc->characteristics.capacity) {
+		return NULL;
+	}
+
+	struct gatt_characteristic_handler *p =
+		&svc->characteristics.handlers[svc->characteristics.index];
+
+	svc->characteristics.index += 1;
+	return p;
+}
+
+static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
+		const uint8_t *uuid, uint8_t uuid_len,
+		struct ble_gatt_characteristic *chr)
+{
+	struct gatt_characteristic_handler *p = svc_chr_alloc(svc);
+
+	if (p == NULL) {
+		PBLE_LOG_ERROR("Out of memory");
+		return NULL;
+	}
+
+	p->func = chr->handler;
+	p->user_ctx = chr->user_ctx;
+
+	ble_add_char_params_t params = {
+		.uuid = *((const uint16_t *)uuid), /* 16-bit characteristic uuid */
+		.uuid_type = svc->uuid.type,
+		.max_len = MAX_ATTR_VALUE_LEN,
+		.init_len = 1,
+		.is_var_len = true,
+		.read_access = SEC_OPEN,
+		.write_access = SEC_OPEN,
+		.cccd_write_access = SEC_OPEN,
+		.is_defered_read = true,
+		.is_defered_write = true,
+	};
+
+	if (chr->op & BLE_GATT_OP_READ) {
+		params.char_props.read = true;
+	}
+	if (chr->op & BLE_GATT_OP_WRITE) {
+		params.char_props.write = true;
+		params.char_props.write_wo_resp = true;
+	}
+	if (chr->op & BLE_GATT_OP_NOTIFY) {
+		params.char_props.notify = true;
+	}
+	if (chr->op & BLE_GATT_OP_INDICATE) {
+		params.char_props.indicate = true;
+	}
+
+	if (characteristic_add(svc->handle, &params, &p->handle)
+			!= NRF_SUCCESS) {
+		PBLE_LOG_ERROR("characteristic registration failure");
+		return NULL;
+	}
+
+	return &p->handle;
+}
+
+static int gatt_response(struct ble_handler_context *ctx,
+		const void *data, uint16_t datasize)
+{
+	struct ble *self = (struct ble *)ctx->ctx;
+	return response_to_request(self, ctx->event_type, data, datasize);
+}
+
+static int gatt_notify(struct ble *self, const void *attr_handle,
+		const void *data, uint16_t datasize)
+{
+	ble_gatts_hvx_params_t params = {
+		.handle = *(const uint16_t *)attr_handle,
+		.type = BLE_GATT_HVX_NOTIFICATION,
+		.p_len = &datasize,
+		.p_data = data,
+	};
+
+	if (sd_ble_gatts_hvx(self->connection_handle, &params)
+			!= NRF_SUCCESS) {
+		return -ENETUNREACH;
+	}
 
 	return 0;
 }
@@ -414,10 +672,12 @@ static int initialize_gatt(struct ble *self)
 	NRF_BLE_GATT_DEF(gatt_handle);
 
 	if (nrf_ble_gatt_init(&gatt_handle, on_gatt_event) != NRF_SUCCESS) {
+		PBLE_LOG_ERROR("GATT initialization failure");
 		return -EIO;
 	}
 	if (nrf_ble_gatt_att_mtu_periph_set(&gatt_handle, DEFAULT_MTU_SIZE)
 			!= NRF_SUCCESS) {
+		PBLE_LOG_ERROR("MTU configuration failure");
 		return -EAGAIN;
 	}
 
@@ -477,6 +737,8 @@ struct ble *nrf52_ble_create(void)
 			.disable = disable_device,
 			.register_gap_event_callback =
 				register_gap_event_callback,
+			.register_gatt_event_callback =
+				register_gatt_event_callback,
 			.get_device_address = get_device_address,
 
 			.adv_init = adv_init,
@@ -488,6 +750,10 @@ struct ble *nrf52_ble_create(void)
 			.adv_stop = adv_stop,
 
 			.gatt_create_service = gatt_create_service,
+			.gatt_add_characteristic = gatt_add_characteristic,
+			.gatt_register_service = gatt_register_service,
+			.gatt_response = gatt_response,
+			.gatt_notify = gatt_notify,
 		},
 	};
 
