@@ -28,6 +28,9 @@ extern "C" {
 #define BLE_ADV_MIN_INTERVAL_MS			20U
 #define BLE_ADV_MAX_INTERVAL_MS			10028U
 
+#define BLE_SERVICE_REQUIRED_MEMORY		(48+24+20) /* bytes */
+#define BLE_CHARACTERISTIC_REQUIRED_MEMORY	56 /* bytes */
+
 enum ble_adv_mode {
 	BLE_ADV_IND,         /**< connectable     scannable     undirected */
 	BLE_ADV_DIRECT_IND,  /**< connectable     non-scannable directed */

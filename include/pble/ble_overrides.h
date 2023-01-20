@@ -23,7 +23,7 @@
 #define PBLE_LOG_INFO(...)
 #endif
 
-#if !defined(PI_LOG_WARN)
+#if !defined(PBLE_LOG_WARN)
 #define PBLE_LOG_WARN(...)
 #endif
 

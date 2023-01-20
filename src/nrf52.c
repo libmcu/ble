@@ -482,15 +482,16 @@ static struct ble_gatt_service *gatt_create_service(void *mem, uint16_t memsize,
 		if (sd_ble_uuid_vs_add((const ble_uuid128_t *)uuid,
 				&svc->uuid.type) != NRF_SUCCESS) {
 			PBLE_LOG_ERROR("can not register uuid");
-			return -ENOSPC;
+			return NULL;
 		}
+		svc->uuid.uuid = *((const uint16_t *)&uuid[12]);
 	}
 
 	/* 2. add a service */
 	if (sd_ble_gatts_service_add(svc_type, &svc->uuid, &svc->handle)
 			!= NRF_SUCCESS) {
 		PBLE_LOG_ERROR("service registration failure");
-		return -ENOMEM;
+		return NULL;
 	}
 
 	return svc;
@@ -531,8 +532,8 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 	p->user_ctx = chr->user_ctx;
 
 	ble_add_char_params_t params = {
-		.uuid = *((const uint16_t *)uuid), /* 16-bit characteristic uuid */
-		.uuid_type = svc->uuid.type,
+		.uuid = *((const uint16_t *)uuid),
+		.uuid_type = BLE_UUID_TYPE_BLE,
 		.max_len = MAX_ATTR_VALUE_LEN,
 		.init_len = 1,
 		.is_var_len = true,
@@ -542,6 +543,18 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 		.is_defered_read = true,
 		.is_defered_write = true,
 	};
+
+	if (uuid_len == UUID_128BIT_SIZE_BYTES) {
+		params.uuid_type = svc->uuid.type;
+		params.uuid = *((const uint16_t *)&uuid[12]);
+#if 0 /* TODO: support 128-bit UUID characteristics */
+		if (sd_ble_uuid_vs_add((const ble_uuid128_t *)uuid,
+				&params.uuid_type) != NRF_SUCCESS) {
+			PBLE_LOG_ERROR("can not register uuid");
+			return NULL;
+		}
+#endif
+	}
 
 	if (chr->op & BLE_GATT_OP_READ) {
 		params.char_props.read = true;
@@ -563,7 +576,7 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 		return NULL;
 	}
 
-	return &p->handle;
+	return &p->handle.value_handle;
 }
 
 static int gatt_response(struct ble_handler_context *ctx,

@@ -306,7 +306,12 @@ static int adv_set_scan_response(struct ble *self,
 static int adv_start(struct ble *self)
 {
 	if (!self->ready) {
-		return -EAGAIN;
+		/* This should be called once all GATT services registered. */
+		nimble_port_freertos_init(ble_spp_server_host_task);
+
+		while (!self->ready) { /* FIXME: remove blocking loop */
+			/* waiting to be ready */
+		}
 	}
 
 	int rc = ble_gap_adv_set_data(self->adv.payload.payload,
@@ -380,6 +385,22 @@ static int adv_init(struct ble *self, enum ble_adv_mode mode)
 	return 0;
 }
 
+static void copy_uuid(ble_uuid_any_t *p, const uint8_t *uuid, uint8_t uuid_len)
+{
+	uint8_t *t = p->u128.value;
+	p->u.type = BLE_UUID_TYPE_128;
+
+	if (uuid_len == 2) {
+		p->u.type = BLE_UUID_TYPE_16;
+		t = (uint8_t *)&p->u16.value;
+	} else if (uuid_len == 4) {
+		p->u.type = BLE_UUID_TYPE_32;
+		t = (uint8_t *)&p->u32.value;
+	}
+
+	memcpy(t, uuid, uuid_len);
+}
+
 static struct ble_gatt_service *gatt_create_service(void *mem, uint16_t memsize,
 		const uint8_t *uuid, uint8_t uuid_len,
 		bool primary, uint8_t nr_chrs)
@@ -397,9 +418,7 @@ static struct ble_gatt_service *gatt_create_service(void *mem, uint16_t memsize,
 	svc_mem_init(svc, mem, memsize);
 
 	ble_uuid_any_t *uuid_converted = (ble_uuid_any_t *)svc_mem_alloc(svc, uuid_len + 1);
-	memcpy(uuid_converted->u128.value, uuid, uuid_len);
-	uuid_converted->u.type = uuid_len == 2? BLE_UUID_TYPE_16 :
-			uuid_len == 4? BLE_UUID_TYPE_32 : BLE_UUID_TYPE_128;
+	copy_uuid(uuid_converted, uuid, uuid_len);
 
 	struct ble_gatt_chr_def *chrs = (struct ble_gatt_chr_def *)
 			svc_mem_alloc(svc, (nr_chrs+1) * sizeof(*chrs));
@@ -429,9 +448,7 @@ static const uint16_t *gatt_add_characteristic(struct ble_gatt_service *svc,
 			&svc->base[0].characteristics[i];
 
 	ble_uuid_any_t *uuid_converted = (ble_uuid_any_t *)svc_mem_alloc(svc, uuid_len + 1);
-	memcpy(uuid_converted->u128.value, uuid, uuid_len);
-	uuid_converted->u.type = uuid_len == 2? BLE_UUID_TYPE_16 :
-			uuid_len == 4? BLE_UUID_TYPE_32 : BLE_UUID_TYPE_128;
+	copy_uuid(uuid_converted, uuid, uuid_len);
 
 	svc->characteristics.handlers[i].func = chr->handler;
 	svc->characteristics.handlers[i].user_ctx = chr->user_ctx;
@@ -513,8 +530,6 @@ static void initialize(struct ble *iface)
 	ble_svc_gap_init();
 	ble_svc_gatt_init();
 	ble_svc_gap_device_name_set(BLE_DEFAULT_DEVICE_NAME);
-
-	nimble_port_freertos_init(ble_spp_server_host_task);
 }
 
 static int enable_device(struct ble *self,
