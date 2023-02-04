@@ -615,10 +615,12 @@ static int initialize_softdevice(void)
 {
 	uint32_t ram_start = 0;
 
+#if 0 /* This should be done first outside the library. */
 	if (nrf_sdh_enable_request() != NRF_SUCCESS) {
 		PBLE_LOG_ERROR("softdevice not ready");
 		return -ENOLINK;
 	}
+#endif
 	if (nrf_sdh_ble_default_cfg_set(CONN_TAG, &ram_start) != NRF_SUCCESS) {
 		PBLE_LOG_ERROR("invalid softdevice configuration");
 		return -EINVAL;
@@ -704,6 +706,7 @@ static int initialize(struct ble *self)
 	if ((rc = initialize_softdevice()) != 0 ||
 			(rc = initialize_gap(self)) != 0 ||
 			(rc = initialize_gatt(self)) != 0) {
+		PBLE_LOG_ERROR("Initialization failure %d", rc);
 		/* return error */
 	}
 
